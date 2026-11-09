@@ -1,0 +1,13 @@
+{
+  "pagination=meta": 18,
+  "shape=fields": 12,
+  "shape=concise": 27,
+  "ids=readable": 59,
+  "errors=rich": 2,
+  "idempotency=confirm": 39,
+  "granularity=task": 50,
+  "descriptions=full": 32,
+  "toolcount=60ns": 3,
+  "ui=A": 48,
+  "errors=rich+content": 19
+}

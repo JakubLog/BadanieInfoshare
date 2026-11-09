@@ -248,6 +248,7 @@ BASE_TOOLS = [
         _obj({"client_id": CLIENT_ID, "class_id": CLASS_ID}, ["client_id", "class_id"]), h_create_booking),
 ]
 
+# [variant:idempotency=confirm]
 CONFIRM_TOOLS = [
     ToolSpec(
         "prepare_booking", "Przygotowuje rezerwację do potwierdzenia.",
@@ -268,7 +269,9 @@ CONFIRM_TOOLS = [
         _obj({"confirmation_token": _s("Token z prepare_booking.")}, ["confirmation_token"]), h_confirm_booking,
         group="confirm"),
 ]
+# [/variant]
 
+# [variant:granularity=task]
 TASK_TOOL = ToolSpec(
     "book_class", "Zapisuje klienta na zajęcia podane nazwą, datą i godziną.",
     # [variant:descriptions=full]
@@ -280,22 +283,29 @@ TASK_TOOL = ToolSpec(
     _obj({"client": _s("Imię i nazwisko albo e-mail klienta."), "class_name": _s("Nazwa zajęć, np. Joga."),
           "date": _s("Data zajęć."), "time": _s("Godzina rozpoczęcia.")}, ["client", "class_name", "date", "time"]),
     h_book_class, group="task")
+# [/variant]
 
 
 def build_toolset(flags: McpFlags) -> list[ToolSpec]:
     from klubfit.mcp.extra_tools import EXTRA_TOOLS
 
+    # [variant:granularity=task]
     if flags.granularity == "task":
         tools = [TASK_TOOL]
+    # [/variant]
     else:
         tools = list(BASE_TOOLS)
+        # [variant:idempotency=confirm]
         if flags.idempotency == "confirm":
             tools = [t for t in tools if t.name != "create_booking"] + CONFIRM_TOOLS
+        # [/variant]
     n_extra = {"5": 0, "20": 15, "60": 55, "60ns": 55}[flags.toolcount]
     tools = tools + EXTRA_TOOLS[:n_extra]
+    # [variant:toolcount=60ns]
     if flags.toolcount == "60ns":
         tools = [ToolSpec(f"{t.namespace}_{t.name}", t.short, t.full, t.schema, t.handler, t.namespace, t.group)
                  for t in tools]
+    # [/variant]
     return tools
 
 

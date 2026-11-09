@@ -28,15 +28,21 @@ def build_reference(flags: RestFlags) -> str:
         "## Listy",
         "Endpointy zwracające listy przyjmują parametry offset i limit (maks. 20).",
     ]
+    # [variant:pagination=meta]
     if flags.pagination == "meta":
         lines.append("Odpowiedź listy ma postać {items, total, returned, next_cursor, note}; "
                      "kolejną stronę pobierzesz parametrem cursor.")
+    # [/variant]
+    # [variant:shape=fields]
     if flags.shape == "fields":
         lines += ["", "## Projekcja pól",
                   "Każdy endpoint GET przyjmuje parametr fields=pole1,pole2,..., który ogranicza odpowiedź "
                   "do wskazanych pól (np. fields=id,first_name,last_name,email)."]
+    # [/variant]
+    # [variant:shape=concise]
     if flags.shape == "concise":
         lines += ["", "## Format odpowiedzi",
                   "Każdy endpoint przyjmuje parametr response_format=concise | detailed (domyślnie detailed). "
                   "concise zwraca tylko najważniejsze pola w czytelnej postaci."]
+    # [/variant]
     return "\n".join(lines)

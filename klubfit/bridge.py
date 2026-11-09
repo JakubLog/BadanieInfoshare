@@ -8,6 +8,7 @@ Baza się nie zmienia. Mapowanie jest deterministyczne:
 
 from __future__ import annotations
 
+# [variant:ids=readable]
 import re
 import sqlite3
 
@@ -65,3 +66,4 @@ class IdBridge:
         raise DomainError("INVALID_ID", f"Nieznany identyfikator w polu '{field}': '{value}'.", 404,
                           field=field, expected=f"identyfikator w formacie {KIND_EXAMPLE[kind]}",
                           example=KIND_EXAMPLE[kind])
+# [/variant]
