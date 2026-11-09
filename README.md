@@ -4,16 +4,18 @@ Repozytorium badawcze do prelekcji „Twoim następnym użytkownikiem nie jest c
 Ten sam system rezerwacji („Klub Fit”) jest wystawiony agentowi trzema ścieżkami: UI (Playwright), REST API i MCP.
 W każdej ścieżce zmieniam jeden element interfejsu naraz i mierzę, jak to zmienia skuteczność agenta.
 
-> **Stan na 2026-11-09: żaden przebieg z API nie został jeszcze wykonany.** W środowisku, w którym powstało
-> repozytorium, nie było zmiennej `ANTHROPIC_API_KEY`. System, harness, walidatory i analiza są zbudowane
-> i przetestowane offline (31 testów, w tym pełna ścieżka runnera ze skryptowanym modelem zamiast API).
-> W repozytorium nie ma jeszcze logów w `runs/`, więc **wszystkie sekcje z wynikami mają status „nie zmierzono”**.
-> Nie ma tu żadnej liczby z eksperymentu. Wyniki powstaną po `make all` (patrz „Reprodukcja”).
+> **Stan na 2026-11-10:** wykonany pilot (138 przebiegów) i pełny plan (10 eksperymentów × 3 modele × wszystkie
+> zadania, n = 20 na komórkę, 4380 przebiegów, 0 przerwanych przez infrastrukturę). Przebiegi szły przez
+> abonament Claude Max (backend `subscription`, patrz „Modele i harness”), a nie przez klucz API.
+> Każda liczba poniżej pochodzi z logów w `runs/` przez `analysis/analyze.py` (`analysis/results.md`, `analysis/results.json`).
 
 ## 1. TL;DR
 
-Nie zmierzono. Pięć zdań z najważniejszymi wynikami zostanie napisanych na podstawie `analysis/results.md`
-po pełnym przebiegu. **TODO**
+1. Jedyny duży efekt dała dostępność UI: semantyczne przyciski, etykiety i trwały komunikat podniosły sukces z 60% (216/360) do 100% (360/360), czyli +40 p.p. [95% CI +35; +45], przy 48 liniach kodu.
+2. Efekt zależy od modelu: Opus miał 100% w obu wariantach UI, Sonnet 45% → 100%, a Haiku 35% → 100%; w wariancie B Sonnet zwykle wyczerpywał limit 20 kroków (77/120 przebiegów), a Haiku zgadywał adresy URL (111/120 przebiegów weszło na nieistniejącą stronę).
+3. Pozostałe dziewięć zmian w REST i MCP nie zmieniło skuteczności (każdy wariant 98–100% zbiorczo), częściowo dlatego, że agenci omijali badany element: w 720 przebiegach eksperymentu z formatem błędów API nie padł ani jeden błąd.
+4. Te zmiany przesuwają za to tokeny: `response_format=concise` daje 0,77× tokenów wejściowych [0,70–0,85], narzędzie zadaniowe `book_class` 4,2 tys. zamiast 13,8 tys., a 60 narzędzi zamiast 5 to 41,2 tys. zamiast 13,4 tys. tokenów na przebieg przy tej samej skuteczności.
+5. Zero reakcji na wstrzyknięte polecenie (0/60 przy 60/60 przebiegów, w których agent je zobaczył) i zero duplikatów po timeoucie zapisu (0/120 nawet bez idempotencji); poza UI najczęstszy błąd to dosłowność Haiku: w 17 przebiegach pominął sobotni crossfit i zapisał klientkę dopiero na poniedziałek, bo „sobota 11:30 jest przed piątkiem 17:00” (cytat w sekcji 6).
 
 ## 2. Metoda
 
@@ -97,6 +99,22 @@ ignorowane (liczy się stan końcowy).
   argumenty, błąd/sukces, rozmiar wyniku w tokenach i znakach, pierwsze 4000 znaków wyniku), `result` (walidator,
   metryki, suma tokenów, koszt, powód zakończenia). Przebieg przerwany błędem infrastruktury zostaje jako
   `<nr>.infra<k>.jsonl` i jest ponawiany (do 3 prób).
+- **Faktycznie użyty backend: `BACKEND=subscription`** (`harness/agent_sdk.py`). Przebiegi idą przez Claude Agent SDK
+  0.2.180 (z dołączonym CLI Claude Code 2.1.321) zalogowane abonamentem Claude Max, bez klucza API. To odstępstwo od stacku z
+  zadania (pętla na SDK `anthropic`, który jest gotowy jako `BACKEND=api`). Konsekwencje:
+  - pętlą steruje CLI Claude Code, ale z naszym promptem systemowym zamiast domyślnego, bez wbudowanych narzędzi
+    (`tools=[]`), bez ustawień i plików z dysku (`setting_sources=[]`, `strict_mcp_config`), `max_turns=20`,
+    `thinking={"type":"adaptive","display":"summarized"}`;
+  - narzędzia środowiska są wystawione jako serwer MCP w procesie, więc model widzi je z prefiksem `mcp__klubfit__`
+    (we wszystkich wariantach jednakowo; w logach i metrykach nazwy są bez prefiksu);
+  - „koszt” to równoważnik cenowy API policzony z `usage` według `config/pricing.yaml` (realnie zużywany jest limit
+    abonamentu); w logu jest też koszt wyliczony przez CLI (`cli_cost_usd`);
+  - wiadomości w strumieniu CLI niosą dokładne tokeny wejściowe kroku, ale nie wyjściowe: suma tokenów wyjściowych
+    pochodzi z końcowego `ResultMessage`;
+  - rozmiar wyniku narzędzia w tokenach jest **szacowany** z przyrostu promptu między krokami
+    (`result_tokens_method: estimate_prompt_growth`), bo `count_tokens` wymaga klucza API;
+  - wyczerpanie limitu abonamentu nie jest porażką agenta: log zostaje jako `<nr>.quota<k>.jsonl`, runner czeka do
+    resetu okna i powtarza przebieg.
 
 ### Metryki (dokładne definicje: `harness/metrics.py`)
 
@@ -117,65 +135,159 @@ z przedziałem bootstrap (`analysis/common.py`). Reguły werdyktów są zapisane
 
 ### n, budżet, daty, koszt
 
-- Plan: pilot n = 2 na wariant × model (zadania rotowane), potem n = 20 na komórkę model × wariant × zadanie.
-  Kolejność redukcji przy przekroczeniu `BUDGET_USD`: bez priorytetu 3 → bez priorytetu 2 → n = 10 → największe
-  n z przedziału 9..3 (`harness/estimate.py`). Decyzja zostanie zapisana w `runs/ESTIMATE.md`.
-- Faktyczne n, daty przebiegów, liczba przebiegów przerwanych przez infrastrukturę i koszt całkowity:
-  **nie zmierzono** (brak przebiegów).
+- **Pilot**: 2026-11-09, 21:59–22:01 UTC, 138 przebiegów (n = 2 na wariant × model, zadania rotowane), 0 przerwanych.
+  Średni koszt przebiegu: 0,0274 USD (równoważnik API), łącznie 3,79 USD (`runs/ESTIMATE.md`).
+- **Szacunek i decyzja o zakresie**: przy domyślnym `BUDGET_USD=50` reguła z `HYPOTHESES.md` wybrała tylko priorytet 1,
+  n = 10 (zapis: `runs/ESTIMATE_budget50.md`). Po decyzji zleceniodawcy („odpalamy wszystkie testy”) ustawiłem
+  `BUDGET_USD=200`. Przebiegi szły z abonamentu, więc budżet liczy się w równoważniku API. Ten sam estymator wybrał wtedy
+  pełny plan (priorytety 1–3, n = 20, szacunek 130,92 USD, `runs/ESTIMATE.md`, `runs/plan.json`). Pierwsze 9 przebiegów
+  pełnego planu powstało jeszcze w zakresie „priorytet 1, n = 10”. Mają ten sam format i należą do pełnego planu.
+- **Pełny przebieg**: 2026-11-09, 22:01–23:03 UTC, 4380 przebiegów, n = 20 w każdej komórce model × wariant × zadanie,
+  0 przerwanych przez infrastrukturę, 0 wstrzymań na limicie abonamentu. 110 przebiegów skończyło się na limicie 20 kroków.
+- **Koszt** (równoważnik API wg `config/pricing.yaml`; realnie zużyty był limit abonamentu Max): pełny przebieg
+  105,45 USD, pilot 3,79 USD, klasyfikator błędów 2,39 USD, razem 111,62 USD. Przed pilotem usunąłem logi pierwszych
+  przebiegów testowych (`runs/debug`) i przerwanego pierwszego podejścia do pilota po poprawce błędu w obsłudze limitu
+  kroków. Ich koszt nie jest w sumie: zakończone z nich przebiegi kosztowały wg wypisu runnera ok. 0,04 USD, a kosztu
+  przerwanych nie znam.
 
 ## 3. Hipotezy vs wyniki
 
-| ID | Hipoteza (pełna treść i reguły w `HYPOTHESES.md`) | Przewidywany kierunek | Werdykt |
-|---|---|---|---|
-| H1 | Semantyczny HTML z etykietami podnosi skuteczność względem ikon bez etykiet | A > B | nie zmierzono |
-| H2 | Bogate błędy API podnoszą skuteczność | rich > generic | nie zmierzono |
-| H3 | Narzędzie zadaniowe `book_class` podnosi skuteczność i zmniejsza liczbę wywołań | task > granular | nie zmierzono |
-| H4 | Projekcja pól / format zwięzły zmniejszają tokeny bez spadku skuteczności | concise, fields < full (tokeny) | nie zmierzono |
-| H5 | Ciche obcięcie paginacji powoduje fałszywą kompletność | meta > silent | nie zmierzono |
-| H6 | Więcej narzędzi = mniej sukcesu i więcej złych wyborów; przestrzenie nazw pomagają | 5 > 60; 60ns < 60 (zły wybór) | nie zmierzono |
-| H7 | Czytelne ID zmniejszają zepsute ID i podnoszą skuteczność | readable > uuid | nie zmierzono |
-| H8 | Pełne opisy narzędzi podnoszą skuteczność | full > short | nie zmierzono |
-| H9 | prepare + confirm z kluczem idempotencji zapobiega duplikatom po timeoucie | confirm < direct (duplikaty) | nie zmierzono |
-| H10 | Część przebiegów wykona polecenie z notatki klienta | reakcja > 0 | nie zmierzono |
+Werdykty według reguł z `HYPOTHESES.md`, na danych zbiorczych (3 modele × zadania eksperymentu).
 
-Po pełnym przebiegu tabelę z wynikami, przedziałami i werdyktami generuje `analysis/analyze.py` (sekcja „Hipotezy”
-w `analysis/results.md`). **TODO:** przenieść ją tutaj.
+| ID | Hipoteza | Porównanie | Wynik | 95% CI | Werdykt |
+|---|---|---|---|---|---|
+| H1 | Semantyczne UI (A) podnosi sukces względem ikon bez etykiet (B) | sukces A − B (360/360 vs 216/360) | +40 p.p. | [+35; +45] | **potwierdzona** |
+| H2 | Bogate błędy API podnoszą sukces | sukces rich − generic (356/360 vs 358/360) | −1 p.p. | [−2; +1] | obalona¹ |
+| H3 | Narzędzie zadaniowe `book_class` podnosi sukces | sukces task − granular (180/180 vs 179/180) | +1 p.p. | [−2; +3] | obalona² |
+| H4 | `concise` zmniejsza tokeny bez spadku sukcesu | tokeny we concise / full | 0,77× | [0,70–0,85] | **potwierdzona** |
+| H4 | `?fields=` zmniejsza tokeny bez spadku sukcesu | tokeny we fields / full | 0,99× | [0,91–1,08] | obalona |
+| H5 | Metadane paginacji podnoszą sukces | sukces meta − silent (120/120 vs 119/120) | +1 p.p. | [−2; +5] | obalona |
+| H6 | 5 narzędzi daje wyższy sukces niż 60 | sukces 5 − 60 (177/180 vs 176/180) | +1 p.p. | [−3; +4] | obalona |
+| H6 | 60 narzędzi daje więcej złych wyborów niż 5 | zły wybór 60 − 5 (0/180 vs 0/180) | 0 p.p. | [−2; +2] | obalona |
+| H6 | Przestrzenie nazw zmniejszają złe wybory | zły wybór 60ns − 60 (0/180 vs 0/180) | 0 p.p. | [−2; +2] | obalona |
+| H7 | Czytelne ID podnoszą sukces | sukces readable − uuid (180/180 vs 180/180) | 0 p.p. | [−2; +2] | obalona |
+| H8 | Pełne opisy narzędzi podnoszą sukces | sukces full − short (179/180 vs 179/180) | 0 p.p. | [−3; +3] | obalona |
+| H9 | prepare + confirm zapobiega duplikatom po timeoucie | duplikaty confirm − direct (0/120 vs 0/120) | 0 p.p. | [−3; +3] | obalona |
+| H10 | Część przebiegów wykona wstrzyknięte polecenie | reakcja injected − none (0/60 vs 0/60) | 0 p.p. | [−6; +6] | obalona |
+
+¹ Badany element nie zadziałał: w obu wariantach było 0 błędów narzędzia na 720 przebiegów. Agenci najpierw czytali
+(np. listę zapisów pełnych zajęć) i nigdy nie wysłali żądania, które API by odrzuciło. Werdykt „obalona” wynika z
+reguły, ale wynik mówi tylko tyle, że w tych zadaniach format błędu nie miał okazji niczego zmienić.
+² Efekt sufitowy: wariant bazowy miał już 99%. Narzędzie zadaniowe zmieniło za to koszt (sekcja 4).
 
 ## 4. Wyniki per eksperyment
 
-Nie zmierzono. `make analyze` tworzy `analysis/results.md`: dla każdego eksperymentu tabelę wariantów (n, sukces,
-95% CI, wywołania, tokeny, koszt, samonaprawa, pętle, fałszywa kompletność, ID spoza odpowiedzi, zły wybór narzędzia,
-duplikaty, reakcja na wstrzyknięcie) oraz rozbicie per model i per zadanie. **TODO**
+Pełne tabele (wszystkie metryki, rozbicie per model i per zadanie): `analysis/results.md`. Zestawienie:
 
-Wykresy (`make analyze` → `analysis/charts/`): `success_before_after.png` (sukces przed/po per ścieżka),
-`tokens_per_variant.png` (tokeny per wariant), `toolcount_vs_wrong_tool.png` (liczba narzędzi vs zły wybór). **TODO**
+| Eksperyment | Wariant | Sukces [95% CI] | Wywołania | Tokeny we / przebieg | Uwagi |
+|---|---|---|---|---|---|
+| `ui_labels` | B | 60% [55–65%] | 19,6 | 72 169 | Opus 100%, Sonnet 45%, Haiku 35%; samonaprawa 737/1284 błędów narzędzia |
+| | A | 100% [99–100%] | 13,8 | 76 752 | wszystkie modele 100% |
+| `api_errors` | generic | 99% [98–100%] | 5,1 | 35 617 | 0 błędów narzędzia |
+| | rich | 99% [97–100%] | 5,1 | 35 511 | 0 błędów narzędzia |
+| `mcp_granularity` | granular | 99% [97–100%] | 6,0 | 13 769 | |
+| | task | 100% [98–100%] | 1,7 | 4 212 | |
+| `api_shape` | full | 100% [98–100%] | 4,5 | 26 975 | |
+| | fields | 100% [98–100%] | 4,4 | 26 682 | 10 błędów narzędzia (odpowiedź „Bad Request”, bo błędy są w wariancie bazowym), 6 z 9 okazji naprawionych |
+| | concise | 100% [98–100%] | 4,2 | 20 748 | |
+| `api_pagination` | silent | 99% [95–100%] | 2,9 | 20 737 | fałszywa kompletność 1/120 (Haiku: „20 osób”) |
+| | meta | 100% [97–100%] | 2,6 | 20 006 | fałszywa kompletność 0/120 |
+| `mcp_toolcount` | 5 | 98% [95–99%] | 5,8 | 13 441 | zły wybór narzędzia 0/180 we wszystkich wariantach |
+| | 20 | 99% [96–100%] | 5,9 | 21 643 | |
+| | 60 | 98% [94–99%] | 5,8 | 41 219 | |
+| | 60ns | 99% [96–100%] | 5,8 | 42 391 | |
+| `api_ids` | uuid | 100% [98–100%] | 6,3 | 45 255 | ID spoza odpowiedzi 0/180 |
+| | readable | 100% [98–100%] | 6,2 | 43 174 | ID spoza odpowiedzi 0/180 |
+| `mcp_descriptions` | short | 99% [97–100%] | 5,9 | 13 701 | |
+| | full | 99% [97–100%] | 7,5 | 20 252 | więcej wywołań kontrolnych |
+| `mcp_idempotency` | direct | 100% [97–100%] | 6,6 | 16 929 | timeout w 120/120 przebiegach, duplikaty 0/120 |
+| | confirm | 100% [97–100%] | 7,3 | 19 046 | timeout w 120/120 przebiegach, duplikaty 0/120 |
+| `mcp_injection` | none | 100% [94–100%] | 3,9 | 10 908 | |
+| | injected | 100% [94–100%] | 3,6 | 10 754 | notatka widoczna w 60/60, reakcja 0/60 |
+
+Co dzieje się w wariancie B UI (`ui_labels`, z logów):
+- **Opus 5.5**: 120/120 sukcesów, 0 wejść na nieistniejącą stronę, 0 przebiegów na limicie kroków (średnio 18,8 wywołania
+  wobec 14,4 w A).
+- **Sonnet 5.5**: 54/120 sukcesów, 77/120 przebiegów na limicie 20 kroków. Przy większym limicie część przebiegów mogłaby
+  się udać; mierzę skuteczność przy limicie z zadania.
+- **Haiku 5.5**: 42/120 sukcesów, 111/120 przebiegów z co najmniej jednym `goto` na nieistniejący adres (łącznie 551 takich
+  wywołań w wariancie B, 0 w wariancie A): agent zgaduje `/zajecia`, `/grafik`, `/klienci`, bo nie widzi menu.
+- Metryka „ID spoza odpowiedzi” w B (118/360) liczy te zgadywane segmenty ścieżek. To nie są identyfikatory encji
+  (patrz sekcja 8).
+
+Wykresy (`analysis/charts/`): `success_before_after.png` (sukces przed/po per ścieżka), `tokens_per_variant.png`
+(tokeny per wariant), `toolcount_vs_wrong_tool.png` (liczba narzędzi vs zły wybór i sukces).
 
 ## 5. Taksonomia błędów
 
 Procedura (`analysis/taxonomy.py`): każdy nieudany przebieg pełnego planu dostaje skrócony ślad (polecenie,
 walidator, podsumowania myślenia, wywołania i wyniki narzędzi) i trafia do osobnego promptu klasyfikującego
-(`TAGGER_MODEL`, domyślnie `claude-sonnet-5-5`, `effort=low`) z kategoriami: fałszywa kompletność, zmyślone parametry,
+(`claude-sonnet-5-5`, `effort=low`, przez abonament) z kategoriami: fałszywa kompletność, zmyślone parametry,
 zepsute ID, pętle, priory formatów, rozmycie uwagi, dosłowność, niejednoznaczne nazwy, brak potwierdzenia, ogólny błąd.
-Tagi trafiają do `analysis/taxonomy.jsonl`, koszt do `analysis/taxonomy_log.jsonl`, a losowe 20% otagowanych
-przebiegów (stały seed) do `analysis/manual_check.csv` z pustymi kolumnami `manual_primary` i `manual_notes`.
+Tagi: `analysis/taxonomy.jsonl`, koszt: `analysis/taxonomy_log.jsonl`.
 
-- Rozkład kategorii: nie zmierzono. **TODO**
-- Zgodność klasyfikatora z oceną ręczną: **TODO** (do uzupełnienia po ręcznej ocenie `analysis/manual_check.csv`).
+Otagowano 165 nieudanych przebiegów (144 z wariantu B UI, 21 z pozostałych eksperymentów). Kategoria główna:
+
+| Kategoria | Przebiegi | Gdzie |
+|---|---|---|
+| ogólny błąd | 95 | 92 w UI B (głównie wyczerpanie limitu kroków); w tym 1 przebieg, którego odpowiedzi klasyfikatora nie dało się sparsować |
+| zmyślone parametry | 35 | UI B (zgadywane adresy URL) |
+| dosłowność | 15 | 11 w MCP (`full_class_fallback`, Haiku), 4 w UI B |
+| pętle | 6 | UI B |
+| priory formatów | 4 | REST `full_class_fallback` |
+| fałszywa kompletność | 4 | 3 w UI B, 1 w paginacji silent |
+| rozmycie uwagi | 3 | REST i UI B |
+| niejednoznaczne nazwy | 2 | UI B |
+| brak potwierdzenia | 1 | UI B |
+
+Sprawdzenie w logach wskazuje, że klasyfikator myli się co najmniej w części przypadków. Wszystkie 17 przebiegów,
+w których Haiku zapisał Katarzynę na poniedziałek zamiast na sobotę, kończą się tym samym wynikiem (mechanizm z cytatu 1), a klasyfikator
+przypisał im różne kategorie („dosłowność”, „priory formatów”, „rozmycie uwagi”).
+
+- Próbka do ręcznej oceny: `analysis/manual_check.csv`, 33 przebiegi (20% otagowanych, stały seed), puste kolumny
+  `manual_primary` i `manual_notes`.
+- Zgodność klasyfikatora z oceną ręczną: **TODO** (po ręcznej ocenie `analysis/manual_check.csv`).
 
 ## 6. Cytaty ze śladów rozumowania
 
-Nie ma jeszcze śladów. **TODO:** po przebiegu wybrać 3 prawdziwe cytaty z pól `thinking` rekordów `step`
-(z linkiem do pliku logu i numerem kroku), w tym jeden z błędem, którego człowiek by nie popełnił.
+Pole `thinking` to podsumowanie myślenia generowane przez API (`display: "summarized"`), nie surowy tok myślenia.
+API zwracało je po angielsku; obok podaję tłumaczenie.
+
+1. **Błąd, którego człowiek by nie popełnił** ([`runs/mcp_granularity/granular/claude-haiku-5-5/full_class_fallback/04.jsonl`](runs/mcp_granularity/granular/claude-haiku-5-5/full_class_fallback/04.jsonl), krok 4):
+   > „Saturday at 11:30 comes before Friday at 17:00, so it doesn't count as "later." The next option that fits "najbliższy późniejszy" is Monday the 16th at 18:30, which is after Friday 17:00.”
+
+   („Sobota 11:30 jest przed piątkiem 17:00, więc nie liczy się jako »późniejsza«. Następna opcja pasująca do »najbliższy późniejszy« to poniedziałek 16-go o 18:30”). Agent porównał same godziny i zgubił datę. Ten sam wynik (zapis na poniedziałek) dało 17 z 21 nieudanych przebiegów poza UI.
+2. **Agent nie widzi menu, więc zgaduje adresy** ([`runs/ui_labels/B/claude-haiku-5-5/book_anna/02.jsonl`](runs/ui_labels/B/claude-haiku-5-5/book_anna/02.jsonl), krok 6):
+   > „No navigation is visible on the page, so I'll try a few likely URLs directly, starting with /grafik, then /klienci and /zapisy.”
+
+   („Na stronie nie widać nawigacji, więc spróbuję kilku prawdopodobnych adresów: najpierw /grafik, potem /klienci i /zapisy”).
+3. **Fałszywa kompletność przy cichej paginacji** ([`runs/api_pagination/silent/claude-haiku-5-5/count_yoga/18.jsonl`](runs/api_pagination/silent/claude-haiku-5-5/count_yoga/18.jsonl), krok 3):
+   > „I'm verifying the count: 20 active bookings against a capacity of 25, and the sequence numbers 3 and 129 through 147 add up to the same 20.”
+
+   („Weryfikuję liczbę: 20 aktywnych rezerwacji przy pojemności 25…”). API zwróciło pierwsze 20 z 23 rekordów bez informacji o obcięciu. Agent dokładnie przeliczył to, co dostał, i odpowiedział „WYNIK: 20”.
 
 ## 7. „Nowy kolor przycisku”
 
 Metoda: dla każdej zmiany „wariant bazowy → ulepszony” `analysis/analyze.py` liczy różnicę sukcesu (p.p., z 95% CI
 Newcombe'a) i dzieli ją przez koszt wdrożenia, czyli liczbę niepustych linii kodu implementujących wariant
 ulepszony w tym repozytorium (`analysis/variant_loc.py`: znaczniki `# [variant:…]` w Pythonie oraz gałęzie
-`V == "A"` w szablonach UI). Dla bogatych błędów liczone są dwie wartości: sama zmiana w warstwie REST i ta zmiana
-razem z liniami treści błędów (`expected=`/`example=`) w domenie, bo bez nich wariant nie miałby czego pokazać.
+`V == "A"` w szablonach UI). Dla bogatych błędów liczona jest zmiana w warstwie REST razem z liniami treści błędów
+(`expected=`/`example=`) w domenie.
 
-Wynik: nie zmierzono. **TODO**
+| Zmiana | Δ sukcesu | 95% CI | Linie kodu | p.p. na linię |
+|---|---|---|---|---|
+| UI: B → A (etykiety, `<button>`, trwały komunikat, menu w `<nav>`) | +40 p.p. | [+35; +45] | 48 | 0,83 |
+| MCP: 60 → 60 z przestrzeniami nazw | +1 p.p. | [−2; +5] | 3 | 0,37 |
+| REST: paginacja silent → meta | +1 p.p. | [−2; +5] | 18 | 0,05 |
+| MCP: granular → `book_class` | +1 p.p. | [−2; +3] | 50 | 0,01 |
+| REST: błędy generic → rich | −1 p.p. | [−2; +1] | 19 | −0,03 |
+| pozostałe (concise, fields, readable ID, pełne opisy, prepare/confirm) | 0 p.p. | — | 12–59 | 0,00 |
+
+**Wniosek:** najlepszy stosunek efektu do kosztu daje UI z semantycznymi kontrolkami: +40 p.p. za 48 linii. To jedyna zmiana, której
+przedział ufności leży w całości powyżej zera. Drugie miejsce (przestrzenie nazw) to artefakt dzielenia szumu
+przez 3 linie, bo jego przedział obejmuje zero. Jeśli liczy się koszt, a nie sukces, w MCP najwięcej daje `book_class`:
+0,31× tokenów wejściowych (4 212 vs 13 769) i 1,7 zamiast 6,0 wywołania przy tym samym sukcesie. W REST najwięcej daje
+`response_format=concise` (0,77× tokenów).
 
 ## 8. Ograniczenia i decyzje projektowe
 
@@ -192,6 +304,20 @@ Wynik: nie zmierzono. **TODO**
 - Zadania są przypisane do eksperymentów z góry (tam, gdzie badany element jest używany). Porównania między
   ścieżkami nie są czyste, bo ścieżki mają różne zestawy zadań i różne wartości bazowe.
 - Metryka „zły wybór narzędzia” ma sens tylko w MCP (REST ma jedno narzędzie, UI cztery ogólne).
+- **Efekt sufitowy.** Modele 5.5 rozwiązały prawie wszystkie zadania REST i MCP w każdym wariancie. Zadania okazały się za
+  łatwe, żeby różnicować te warianty. Zerowe wyniki dotyczą tych 6 zadań i tych modeli, a nie wszystkich API.
+- **Badany element nie zawsze się pojawił.** W eksperymencie z błędami API nie wystąpił żaden błąd (0 na 720 przebiegów),
+  a w eksperymencie z paginacją agenci w wariancie silent sami pobierali kolejną stronę (`offset` jest w dokumentacji obu
+  wariantów).
+- **Limit 20 kroków** decyduje o wyniku Sonneta w UI B (77/120 przebiegów na limicie). Inny limit dałby inny wynik.
+- **„ID spoza odpowiedzi” w UI** liczy wszystkie segmenty ścieżki w `goto`, które nie są nazwą trasy. W wariancie B
+  to prawie wyłącznie zgadywane nazwy stron (`zajecia`, `grafik`, `klienci`…), a nie identyfikatory encji. Poprawne
+  przeliczenie wymagałoby pełnych wyników narzędzi, a log trzyma pierwsze 4000 znaków, więc zostawiam metrykę taką,
+  jak zebrał ją runner, i opisuję ją tutaj.
+- **Backend abonamentowy** (sekcja 2): pętlą steruje CLI Claude Code, narzędzia mają prefiks `mcp__klubfit__`, rozmiar
+  wyniku w tokenach jest szacowany, a koszt to równoważnik API. To odstępstwo od stacku z zadania (SDK `anthropic`).
+- **Ślady rozumowania** to podsumowania generowane przez API (po angielsku), nie pełny tok myślenia.
+- **Taksonomia** pochodzi z modelu i nie jest jeszcze zweryfikowana ręcznie (sekcja 5).
 
 ## 9. Reprodukcja
 
@@ -202,6 +328,14 @@ export MODELS=claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5   # opcjonalnie
 make setup test                       # zależności (uv), Chromium, testy offline
 make smoke                            # 1 tani przebieg (Haiku, REST) do sprawdzenia klucza i harnessu
 make all                              # setup → test → seed → pilot + ESTIMATE.md → pełny przebieg → analiza
+```
+
+Wariant użyty w tym badaniu (abonament Claude Pro/Max zamiast klucza, po `claude auth login`):
+
+```bash
+export BACKEND=subscription BUDGET_USD=200 CONCURRENCY=14   # budżet w równoważniku API
+uv run python -m harness.runner pilot && uv run python -m harness.runner full
+make analyze                                                # klasyfikator też przez abonament
 ```
 
 Inne zmienne: `CONCURRENCY` (domyślnie 8), `TAGGER_MODEL` (domyślnie `claude-sonnet-5-5`), `TAGGER_RESERVE_USD`

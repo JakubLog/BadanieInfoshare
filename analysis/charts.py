@@ -22,7 +22,7 @@ BEFORE_AFTER = [("UI: etykiety", "ui_labels", "B", "A"), ("REST: błędy", "api_
 
 
 def _err(s):
-    return [[100 * (s["p"] - s["lo"])], [100 * (s["hi"] - s["p"])]]
+    return [[max(0.0, 100 * (s["p"] - s["lo"]))], [max(0.0, 100 * (s["hi"] - s["p"]))]]
 
 
 def success_before_after(res: dict) -> None:

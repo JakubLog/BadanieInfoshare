@@ -64,6 +64,22 @@ def parse(text: str) -> dict | None:
     obj["secondary"] = [s for s in obj.get("secondary", []) if s in TAXONOMY and s != obj["primary"]]
     return obj
 
+USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+async def _tag_subscription(model: str, trace: str) -> tuple[str, dict]:
+    """Klasyfikacja przez Claude Agent SDK zalogowane abonamentem (BACKEND=subscription): bez narzędzi, 1 tura."""
+    from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
+    opts = ClaudeAgentOptions(system_prompt=TAGGER_SYSTEM, tools=[], setting_sources=[], skills=[], max_turns=1,
+                              model=model, effort="low", env={"ANTHROPIC_API_KEY": ""})
+    text, usage = "", {k: 0 for k in USAGE_KEYS}
+    async for msg in query(prompt=trace, options=opts):
+        if isinstance(msg, ResultMessage):
+            text = msg.result or ""
+            usage = {k: int((msg.usage or {}).get(k) or 0) for k in USAGE_KEYS}
+    return text, usage
+
 
 async def tag_all(concurrency: int = 6) -> None:
     model = os.environ.get("TAGGER_MODEL", "claude-sonnet-5-5")
@@ -71,7 +87,8 @@ async def tag_all(concurrency: int = 6) -> None:
     done = {json.loads(l)["file"] for l in OUT.read_text().splitlines()} if OUT.exists() else set()
     rows, _ = load_runs()
     todo = [r for r in rows if not r["success"] and r["file"] not in done]
-    client = anthropic.AsyncAnthropic(max_retries=10, timeout=300)
+    backend = os.environ.get("BACKEND", "api")
+    client = anthropic.AsyncAnthropic(max_retries=10, timeout=300) if backend == "api" else None
     sem = asyncio.Semaphore(concurrency)
     spent = total_spent()
     skipped = 0
@@ -84,17 +101,19 @@ async def tag_all(concurrency: int = 6) -> None:
                 return
             trace = condensed_trace(r["file"])
             for _attempt in range(2):
-                resp = await client.messages.create(
-                    model=model, max_tokens=8000, system=TAGGER_SYSTEM, output_config={"effort": "low"},
-                    messages=[{"role": "user", "content": trace}])
-                usage = {k: getattr(resp.usage, k, 0) or 0 for k in
-                         ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")}
+                if client is not None:
+                    resp = await client.messages.create(
+                        model=model, max_tokens=8000, system=TAGGER_SYSTEM, output_config={"effort": "low"},
+                        messages=[{"role": "user", "content": trace}])
+                    usage = {k: getattr(resp.usage, k, 0) or 0 for k in USAGE_KEYS}
+                    text = "".join(b.text for b in resp.content if b.type == "text")
+                else:
+                    text, usage = await _tag_subscription(model, trace)
                 cost = step_cost(model, usage) or 0.0
                 spent += cost
                 with TAGGER_LOG.open("a", encoding="utf-8") as f:
                     f.write(json.dumps({"type": "tagger", "file": r["file"], "model": model, "usage": usage,
-                                        "cost_usd": cost}) + "\n")
-                text = "".join(b.text for b in resp.content if b.type == "text")
+                                        "cost_usd": cost, "backend": backend}) + "\n")
                 tag = parse(text)
                 if tag:
                     break
@@ -107,7 +126,8 @@ async def tag_all(concurrency: int = 6) -> None:
     try:
         await asyncio.gather(*(one(r) for r in todo))
     finally:
-        await client.close()
+        if client is not None:
+            await client.close()
     if skipped:
         print(f"Pominięto {skipped} przebiegów: osiągnięto BUDGET_USD")
 
@@ -130,7 +150,7 @@ def write_manual_sample() -> None:
 
 
 if __name__ == "__main__":
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if os.environ.get("BACKEND", "api") == "api" and not os.environ.get("ANTHROPIC_API_KEY"):
         raise SystemExit("Brak ANTHROPIC_API_KEY w środowisku.")
     asyncio.run(tag_all())
     write_manual_sample()

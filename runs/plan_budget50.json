@@ -1,0 +1,17 @@
+{
+  "run_full": true,
+  "models": [
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "claude-haiku-5-5"
+  ],
+  "max_cost_usd": 47.0,
+  "experiments": [
+    "ui_labels",
+    "api_errors",
+    "mcp_granularity"
+  ],
+  "n": 10,
+  "estimate_usd": 28.138,
+  "scope": "tylko priorytet 1, n=10"
+}
