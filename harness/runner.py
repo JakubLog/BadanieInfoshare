@@ -37,6 +37,7 @@ from klubfit.mcp.injection import apply_injection
 CONFIG = ROOT / "config" / "experiments.yaml"
 DEFAULT_MODELS = "claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5"
 MAX_INFRA_ATTEMPTS = 3
+BACKEND = os.environ.get("BACKEND", "api")   # api (SDK anthropic + klucz) | subscription (Agent SDK + abonament)
 
 
 def load_config() -> dict:
@@ -90,7 +91,8 @@ def correct_tools(path: str, flags) -> set[str] | None:
 class Context:
     def __init__(self, cfg: dict, concurrency: int, max_cost: float | None, client=None):
         self.cfg = cfg
-        self.client = client or anthropic.AsyncAnthropic(max_retries=10, timeout=300)
+        self.client = client or (anthropic.AsyncAnthropic(max_retries=10, timeout=300) if BACKEND == "api" else None)
+        self.quota_until = 0.0
         self.sem = asyncio.Semaphore(concurrency)
         self.counters: dict[str, TokenCounter] = {}
         self.browser = None
@@ -115,7 +117,8 @@ class Context:
         if self.browser is not None:
             await self.browser.close()
             await self._pw.stop()
-        await self.client.close()
+        if self.client is not None:
+            await self.client.close()
 
 
 async def make_env(path: str, flags, db_path: Path, ctx: Context):
@@ -136,13 +139,24 @@ async def execute(spec: RunSpec, ctx: Context) -> dict | None:
     """Jeden przebieg (z ponowieniem przy błędzie infrastruktury). Zwraca rekord wyniku."""
     if completed(spec.log_path):
         return None
-    for attempt in range(1, MAX_INFRA_ATTEMPTS + 1):
+    attempt = quota_hits = 0
+    while attempt < MAX_INFRA_ATTEMPTS:
+        while time.time() < ctx.quota_until:
+            await asyncio.sleep(30)
         if ctx.max_cost is not None and ctx.spent >= ctx.max_cost:
             ctx.skipped_budget += 1
             return None
         res = await _attempt(spec, ctx)
         if not res.get("infra_error"):
             return res
+        if res.get("quota"):
+            quota_hits += 1
+            spec.log_path.rename(spec.log_path.with_suffix(f".quota{quota_hits}.jsonl"))
+            wait_to = (res.get("resets_at") or time.time() + 600) + 60
+            ctx.quota_until = max(ctx.quota_until, wait_to)
+            print(f"Limit abonamentu: wstrzymuję do {datetime.fromtimestamp(ctx.quota_until)}", flush=True)
+            continue
+        attempt += 1
         spec.log_path.rename(spec.log_path.with_suffix(f".infra{attempt}.jsonl"))
         await asyncio.sleep(5 * attempt)
     return res
@@ -173,11 +187,16 @@ async def _attempt(spec: RunSpec, ctx: Context) -> dict:
                    "model": spec.model, "task": spec.task, "rep": spec.rep, "prompt": task.prompt,
                    "started_at": started.isoformat(), "commit": ctx.commit, "system_prompt": system,
                    "system_prompt_sha": hashlib.sha256(system.encode()).hexdigest()[:16],
-                   "tools": [t["name"] for t in env.tools]})
-        counter = ctx.counters.setdefault(spec.model, TokenCounter(ctx.client, spec.model))
+                   "tools": [t["name"] for t in env.tools], "backend": BACKEND})
         agent_cfg = AgentConfig(model=spec.model, max_steps=cfg["defaults"]["max_steps"],
                                 timeout_s=cfg["defaults"]["timeout_s"])
-        out = await run_agent(ctx.client, agent_cfg, system, task.prompt, env, log, counter)
+        if BACKEND == "subscription":
+            from harness.agent_sdk import run_agent_sdk
+
+            out = await run_agent_sdk(agent_cfg, system, task.prompt, env, log)
+        else:
+            counter = ctx.counters.setdefault(spec.model, TokenCounter(ctx.client, spec.model))
+            out = await run_agent(ctx.client, agent_cfg, system, task.prompt, env, log, counter)
         await env.close()
         env = None
         validation = validate(task, db_path, out.final_text)
@@ -189,11 +208,13 @@ async def _attempt(spec: RunSpec, ctx: Context) -> dict:
         result.update(success=validation["success"], validation=validation, metrics=met, usage=out.usage,
                       tokens_in=out.usage["input_tokens"] + out.usage["cache_creation_input_tokens"]
                       + out.usage["cache_read_input_tokens"], tokens_out=out.usage["output_tokens"],
-                      cost_usd=out.cost_usd, steps=out.steps, stop=out.stop, final_text=out.final_text,
-                      infra_error=None)
+                      cost_usd=out.cost_usd, cli_cost_usd=out.cli_cost_usd, steps=out.steps, stop=out.stop,
+                      final_text=out.final_text, infra_error=None)
     except InfraError as e:
         result.update(infra_error=str(e)[:2000])
     except Exception as e:  # awaria harnessu/środowiska: przebieg nie jest liczony
+        if type(e).__name__ == "QuotaError":
+            result.update(quota=True, resets_at=getattr(e, "resets_at", None))
         result.update(infra_error=f"{type(e).__name__}: {e}"[:2000])
     finally:
         if env is not None:
@@ -269,8 +290,8 @@ def main() -> None:
     ap.add_argument("--rep", type=int, default=1)
     ap.add_argument("--concurrency", type=int, default=int(os.environ.get("CONCURRENCY", "8")))
     args = ap.parse_args()
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        sys.exit("Brak ANTHROPIC_API_KEY w środowisku.")
+    if BACKEND == "api" and not os.environ.get("ANTHROPIC_API_KEY"):
+        sys.exit("Brak ANTHROPIC_API_KEY w środowisku (albo ustaw BACKEND=subscription).")
     cfg = load_config()
     if args.phase == "pilot":
         asyncio.run(run_specs(pilot_specs(cfg), args.concurrency, max_cost=budget()))

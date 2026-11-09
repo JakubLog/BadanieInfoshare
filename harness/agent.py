@@ -39,6 +39,7 @@ class Outcome:
     usage: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0,
                                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0})
     cost_usd: float | None = 0.0
+    cli_cost_usd: float | None = None   # backend subscription: koszt wyliczony przez CLI
 
 
 class TokenCounter:
