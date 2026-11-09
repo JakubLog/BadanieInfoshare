@@ -1,4 +1,4 @@
-.PHONY: all setup test seed pilot full analyze
+.PHONY: all setup test seed smoke pilot full analyze
 
 # Pełny cykl: środowisko -> testy -> seed -> pilot + szacunek -> pełny przebieg (jeśli mieści się w BUDGET_USD) -> analiza.
 all: setup test seed pilot full analyze
@@ -12,6 +12,10 @@ test:
 
 seed:
 	uv run python -m klubfit.seed
+
+# jeden tani przebieg z prawdziwym API (Haiku, REST) do sprawdzenia klucza i harnessu przed pilotem
+smoke:
+	uv run python -m harness.runner one --experiment api_errors --variant rich --model claude-haiku-5-5 --task book_anna
 
 # n=2 na wariant × model; zapisuje runs/ESTIMATE.md i runs/plan.json
 pilot:
