@@ -1,0 +1,88 @@
+# Plan eksperymentów. Każdy wariant różni się od wartości bazowej dokładnie jedną flagą.
+# Wartości bazowe flag: klubfit/flags.py (REST: errors=generic, ids=uuid, pagination=meta, shape=full;
+# MCP: granularity=granular, descriptions=short, toolcount=5, idempotency=direct, injection=none).
+# Zadania są przypisane do eksperymentów z góry (przed jakimkolwiek przebiegiem): tam, gdzie badany
+# element jest faktycznie używany przez zadanie.
+
+defaults:
+  n_pilot: 2
+  n_full: 20
+  max_steps: 20
+  timeout_s: 900
+
+all_tasks: &all [book_anna, count_yoga, move_booking, expiring, full_class_fallback, book_two]
+booking_tasks: &booking [book_anna, full_class_fallback, book_two]
+
+experiments:
+  ui_labels:
+    priority: 1
+    path: ui
+    variable: ui
+    variants: {B: {ui: B}, A: {ui: A}}
+    baseline: B
+    tasks: *all
+  api_errors:
+    priority: 1
+    path: rest
+    variable: errors
+    variants: {generic: {errors: generic}, rich: {errors: rich}}
+    baseline: generic
+    tasks: *all
+  mcp_granularity:
+    priority: 1
+    path: mcp
+    variable: granularity
+    variants: {granular: {granularity: granular}, task: {granularity: task}}
+    baseline: granular
+    tasks: *booking
+  api_shape:
+    priority: 2
+    path: rest
+    variable: shape
+    variants: {full: {shape: full}, fields: {shape: fields}, concise: {shape: concise}}
+    baseline: full
+    tasks: [book_anna, expiring, book_two]
+  api_pagination:
+    priority: 2
+    path: rest
+    variable: pagination
+    variants: {silent: {pagination: silent}, meta: {pagination: meta}}
+    baseline: silent
+    tasks: [count_yoga, expiring]
+  mcp_toolcount:
+    priority: 2
+    path: mcp
+    variable: toolcount
+    variants: {"5": {toolcount: "5"}, "20": {toolcount: "20"}, "60": {toolcount: "60"}, 60ns: {toolcount: 60ns}}
+    baseline: "5"
+    tasks: *booking
+  api_ids:
+    priority: 3
+    path: rest
+    variable: ids
+    variants: {uuid: {ids: uuid}, readable: {ids: readable}}
+    baseline: uuid
+    tasks: [book_anna, move_booking, book_two]
+  mcp_descriptions:
+    priority: 3
+    path: mcp
+    variable: descriptions
+    variants: {short: {descriptions: short}, full: {descriptions: full}}
+    baseline: short
+    tasks: *booking
+  mcp_idempotency:
+    priority: 3
+    path: mcp
+    variable: idempotency
+    # warunek środowiska wspólny dla obu wariantów: pierwszy zapis wykonuje się, ale odpowiedź to timeout
+    common: {fault: timeout_first_write}
+    variants: {direct: {idempotency: direct}, confirm: {idempotency: confirm}}
+    baseline: direct
+    tasks: [book_anna, book_two]
+  mcp_injection:
+    priority: 3
+    path: mcp
+    variable: injection
+    variants: {none: {injection: none}, injected: {injection: injected}}
+    baseline: none
+    tasks: [book_anna]

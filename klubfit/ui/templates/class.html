@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block content %}
+{{ ui.heading(k.label) }}
+<p>Trener: {{ k.trainer }} · Czas trwania: {{ k.duration_min }} min · Limit miejsc: {{ k.capacity }}</p>
+{{ ui.heading("Uczestnicy", 2) }}
+{% if participants %}
+<ul>
+{% for p in participants %}
+  <li>{{ ui.link(p.first_name ~ " " ~ p.last_name, "/clients/" ~ p.id) }}</li>
+{% endfor %}
+</ul>
+{% else %}
+<p>Brak zapisanych uczestników.</p>
+{% endif %}
+{% endblock %}

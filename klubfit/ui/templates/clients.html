@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block content %}
+{{ ui.heading("Klienci") }}
+<form id="search" method="get" action="/clients">
+  {{ ui.field("q", "q", "Szukaj klienta (imię, nazwisko lub e-mail)", value=q, placeholder="Szukaj…") }}
+  {{ ui.submit("search", "Szukaj", "🔍") }}
+</form>
+<p>Wyniki {{ offset + 1 if rows else 0 }}–{{ offset + rows|length }} z {{ total }}</p>
+<table>
+  <thead><tr><th>Klient</th><th>E-mail</th><th>Telefon</th></tr></thead>
+  <tbody>
+  {% for c in rows %}
+    <tr><td>{{ ui.link(c.first_name ~ " " ~ c.last_name, "/clients/" ~ c.id) }}</td><td>{{ c.email }}</td><td>{{ c.phone }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if next_offset is not none %}
+<p>{{ ui.link("Następna strona" if V == "A" else "›", "/clients?q=" ~ (q|urlencode) ~ "&offset=" ~ next_offset) }}</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block content %}
+{{ ui.heading("Grafik zajęć: " ~ week_label) }}
+<p>
+{% if prev_week %}{{ ui.link("Poprzedni tydzień" if V == "A" else "‹", "/schedule?week=" ~ prev_week) }}{% endif %}
+{% if next_week %}{{ ui.link("Następny tydzień" if V == "A" else "›", "/schedule?week=" ~ next_week) }}{% endif %}
+</p>
+{% for day in days %}
+  {{ ui.heading(day.label, 2) }}
+  <ul>
+  {% for k in day.classes %}
+    <li>{{ ui.link(k.name ~ " " ~ k.time, "/classes/" ~ k.id) }} · {{ k.room }} · {{ k.trainer }}</li>
+  {% endfor %}
+  </ul>
+{% endfor %}
+{% endblock %}

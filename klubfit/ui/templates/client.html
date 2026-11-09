@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block content %}
+{{ ui.heading(c.first_name ~ " " ~ c.last_name) }}
+<table>
+  <tr><th>E-mail</th><td>{{ c.email }}</td></tr>
+  <tr><th>Telefon</th><td>{{ c.phone }}</td></tr>
+  <tr><th>Karnet</th><td>{% if m %}{{ m.plan }}, status: {{ m.status }}, ważny do {{ m.valid_to }}{% else %}brak{% endif %}</td></tr>
+  <tr><th>Notatki</th><td>{{ c.notes or "—" }}</td></tr>
+</table>
+
+{{ ui.heading("Rezerwacje", 2) }}
+{% if bookings %}
+<ul>
+{% for b in bookings %}
+  <li>{{ b.label }} {{ ui.action("Anuluj", "Anuluj rezerwację: " ~ b.label, "✕", "/bookings/" ~ b.id ~ "/cancel", {"back": c.id}) }}</li>
+{% endfor %}
+</ul>
+{% else %}
+<p>Brak aktywnych rezerwacji.</p>
+{% endif %}
+
+{{ ui.heading("Zapisz na zajęcia", 2) }}
+<form id="pick" method="get" action="/clients/{{ c.id }}">
+  {{ ui.field("date", "date", "Data zajęć", type="date", value=date or "", placeholder="Data") }}
+  {{ ui.submit("pick", "Pokaż zajęcia", "📅") }}
+</form>
+{% if date %}
+  {% if day_classes %}
+  <ul>
+  {% for k in day_classes %}
+    <li>{{ k.label }} · {{ k.trainer }} · wolne miejsca: {{ k.free }}
+      {{ ui.action("Zapisz", "Zapisz na " ~ k.label, "＋", "/clients/" ~ c.id ~ "/book", {"class_id": k.id}) }}</li>
+  {% endfor %}
+  </ul>
+  {% else %}
+  <p>Brak zajęć w dniu {{ date }}.</p>
+  {% endif %}
+{% endif %}
+{% endblock %}

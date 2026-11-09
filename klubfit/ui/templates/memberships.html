@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block content %}
+{{ ui.heading("Karnety wygasające w ciągu " ~ days ~ " dni") }}
+<p>Aktywne karnety z datą ważności od {{ date_from }} do {{ date_to }} włącznie.</p>
+<p>Okres:
+{% for d in [7, 14, 30] %}{{ ui.link(d ~ " dni", "/memberships?days=" ~ d) }} {% endfor %}
+</p>
+<table>
+  <thead><tr><th>Klient</th><th>E-mail</th><th>Karnet</th><th>Ważny do</th></tr></thead>
+  <tbody>
+  {% for m in rows %}
+    <tr><td>{{ ui.link(m.client_first_name ~ " " ~ m.client_last_name, "/clients/" ~ m.client_id) }}</td><td>{{ m.client_email }}</td><td>{{ m.plan }}</td><td>{{ m.valid_to }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

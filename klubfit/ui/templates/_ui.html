@@ -1,0 +1,46 @@
+{# Elementy interaktywne w dwóch wariantach. Różnice A/B to wyłącznie gałęzie `V == "A"`
+   w szablonach (liczone przez analysis/variant_loc.py). #}
+
+{% macro action(text, aria, icon, url, data) -%}
+{%- if V == "A" -%}
+<form method="post" action="{{ url }}" class="inline">
+  {%- for k, v in data.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor -%}
+  <button type="submit" aria-label="{{ aria }}">{{ text }}</button>
+</form>
+{%- else -%}
+<div class="icon-btn" onclick='postAction({{ url|tojson }}, {{ data|tojson }})'>{{ icon }}</div>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro link(text, href) -%}
+{%- if V == "A" -%}
+<a href="{{ href }}">{{ text }}</a>
+{%- else -%}
+<span class="clickable" onclick="location.href='{{ href }}'">{{ text }}</span>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro submit(form_id, text, icon) -%}
+{%- if V == "A" -%}
+<button type="submit">{{ text }}</button>
+{%- else -%}
+<div class="icon-btn" onclick="document.getElementById('{{ form_id }}').submit()">{{ icon }}</div>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro field(id, name, label, type="text", value="", placeholder="") -%}
+{%- if V == "A" -%}
+<label for="{{ id }}">{{ label }}</label>
+<input id="{{ id }}" name="{{ name }}" type="{{ type }}" value="{{ value }}">
+{%- else -%}
+<input id="{{ id }}" name="{{ name }}" type="{{ type }}" value="{{ value }}" placeholder="{{ placeholder }}">
+{%- endif -%}
+{%- endmacro %}
+
+{% macro heading(text, level=1) -%}
+{%- if V == "A" -%}
+<h{{ level }}>{{ text }}</h{{ level }}>
+{%- else -%}
+<div class="{{ 'h' if level == 1 else 'sh' }}">{{ text }}</div>
+{%- endif -%}
+{%- endmacro %}
