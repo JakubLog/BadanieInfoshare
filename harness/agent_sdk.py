@@ -16,6 +16,7 @@ import time
 
 from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, RateLimitEvent, ResultMessage, ToolAnnotations,
                               create_sdk_mcp_server, query, tool)
+from claude_agent_sdk._errors import ResultError
 from claude_agent_sdk.types import TextBlock, ThinkingBlock, ToolUseBlock
 
 from harness.agent import LOG_RESULT_CHARS, AgentConfig, InfraError, Outcome
@@ -126,7 +127,21 @@ async def _loop(cfg: AgentConfig, system: str, user: str, env, out: Outcome, sta
         env={"ANTHROPIC_API_KEY": "", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"})
     steps, order = state["steps"], state["order"]
     t_prev = time.monotonic()
-    async for msg in query(prompt=user, options=options):
+    try:
+        await _consume(query(prompt=user, options=options), out, state, steps, order, t_prev)
+    except ResultError as e:
+        if e.subtype == "error_max_turns" or "maximum number of turns" in str(e):
+            out.stop = "max_steps"  # porażka agenta, nie infrastruktury
+        elif "429" in str(e) or "rate" in str(e).lower() and "limit" in str(e).lower():
+            raise QuotaError(f"Agent SDK: {e}", None) from e
+        else:
+            raise InfraError(f"Agent SDK: {e}") from e
+    if not out.stop:
+        out.stop = "end_turn"
+
+
+async def _consume(stream, out: Outcome, state: dict, steps: dict, order: list, t_prev: float) -> None:
+    async for msg in stream:
         if isinstance(msg, RateLimitEvent) and msg.rate_limit_info.status == "rejected":
             raise QuotaError(f"limit abonamentu: {msg.rate_limit_info.rate_limit_type}", msg.rate_limit_info.resets_at)
         if isinstance(msg, AssistantMessage):
@@ -159,10 +174,9 @@ async def _loop(cfg: AgentConfig, system: str, user: str, env, out: Outcome, sta
                 raise QuotaError("Agent SDK: HTTP 429", None)
             if msg.is_error and msg.api_error_status:
                 raise InfraError(f"Agent SDK: HTTP {msg.api_error_status} {msg.errors}")
-            out.final_text = (msg.result or "").strip()
             reason = f"{msg.terminal_reason or ''} {msg.subtype or ''}"
+            if not msg.is_error:
+                out.final_text = (msg.result or "").strip()
             out.stop = "max_steps" if "max_turns" in reason else (msg.stop_reason or "end_turn")
             out.cli_cost_usd = msg.total_cost_usd
             state["result_usage"] = msg.usage
-    if not out.stop:
-        out.stop = "end_turn"
