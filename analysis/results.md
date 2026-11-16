@@ -2,8 +2,8 @@
 
 Przebiegi liczone: 4380; przerwane błędem infrastruktury (nieliczone): 0.
 Okres przebiegów: 2026-11-09T22:01:59.767940+00:00 – 2026-11-09T23:03:31.521873+00:00 (UTC).
-Koszt: pełny przebieg 105.45 USD, pilot 3.79 USD, wszystkie logi łącznie (z klasyfikatorem) 111.62 USD.
-Powody zakończenia przebiegów: {'end_turn': 4270, 'max_steps': 110}.
+Koszt (równoważnik API wg config/pricing.yaml): pełny przebieg 105.45 USD, pilot 3.79 USD, wszystkie logi łącznie (z klasyfikatorem) 111.62 USD. Koszt wyliczony przez CLI (`cli_cost_usd`): pełny przebieg 129.86 USD, pilot 5.02 USD.
+Powody zakończenia przebiegów: end_turn 4270, max_steps 110.
 
 ## ui_labels (priorytet 1, ścieżka ui; przerwane infra: 0)
 
@@ -258,17 +258,74 @@ Sukces per zadanie:
 | H9 | confirm − direct | duplicates (0/120 vs 0/120) | +0 p.p. | [-3; +3] | obalona |
 | H10 | injected − none | injection_reaction (0/60 vs 0/60) | +0 p.p. | [-6; +6] | obalona |
 
+## Metryki drugorzędne (HYPOTHESES.md)
+
+| hipoteza | porównanie | metryka | wynik | 95% CI | werdykt |
+|---|---|---|---|---|---|
+| H1 | A / B | n_calls (stosunek średnich) | 0.70 | [0.66–0.76] | potwierdzona |
+| H1 | B − A | duplicates (0/360 vs 0/360) | +0 p.p. | [-1; +1] | obalona |
+| H2 | rich / generic | n_calls (stosunek średnich) | 1.00 | [0.94–1.07] | obalona |
+| H2 | rich − generic | self_repair (0/0 vs 0/0) | — | — | nierozstrzygnięta (brak okazji do samonaprawy) |
+| H3 | task / granular | n_calls (stosunek średnich) | 0.28 | [0.26–0.30] | potwierdzona |
+| H3 | task / granular | tokens_in (stosunek średnich) | 0.31 | [0.29–0.32] | potwierdzona |
+| H4 | concise / full | cost (stosunek średnich) | 1.04 | [0.85–1.27] | bez werdyktu (kierunek nie był zapisany) |
+| H4 | fields / full | cost (stosunek średnich) | 1.17 | [0.95–1.44] | bez werdyktu (kierunek nie był zapisany) |
+| H5 | silent − meta | false_completeness (1/120 vs 0/120) | +1 p.p. | [-2; +5] | obalona |
+| H6 | 60 / 5 | tokens_in (stosunek średnich) | 3.07 | [2.89–3.25] | bez werdyktu (kierunek nie był zapisany) |
+| H6 | 60 / 5 | cost (stosunek średnich) | 1.20 | [1.01–1.43] | bez werdyktu (kierunek nie był zapisany) |
+| H7 | readable − uuid | id_not_seen (0/180 vs 0/180) | +0 p.p. | [-2; +2] | obalona |
+| H8 | full / short | n_calls (stosunek średnich) | 1.28 | [1.21–1.35] | bez werdyktu (kierunek nie był zapisany) |
+| H8 | full / short | tokens_in (stosunek średnich) | 1.48 | [1.40–1.57] | bez werdyktu (kierunek nie był zapisany) |
+| H9 | confirm − direct | success (120/120 vs 120/120) | +0 p.p. | [-3; +3] | obalona |
+| H10 | none − injected | success (60/60 vs 60/60) | +0 p.p. | [-6; +6] | obalona |
+
+## E1 (eksploracyjna): różnica sukcesu per model
+
+| eksperyment | porównanie | model | testowany | porównawczy | Δ | 95% CI |
+|---|---|---|---|---|---|---|
+| ui_labels | A − B | claude-haiku-5-5 | 120/120 | 42/120 | +65 p.p. | [+56; +73] |
+| ui_labels | A − B | claude-opus-5-5 | 120/120 | 120/120 | +0 p.p. | [-3; +3] |
+| ui_labels | A − B | claude-sonnet-5-5 | 120/120 | 54/120 | +55 p.p. | [+46; +64] |
+| api_errors | rich − generic | claude-haiku-5-5 | 116/120 | 118/120 | -2 p.p. | [-7; +3] |
+| api_errors | rich − generic | claude-opus-5-5 | 120/120 | 120/120 | +0 p.p. | [-3; +3] |
+| api_errors | rich − generic | claude-sonnet-5-5 | 120/120 | 120/120 | +0 p.p. | [-3; +3] |
+| mcp_granularity | task − granular | claude-haiku-5-5 | 60/60 | 59/60 | +2 p.p. | [-5; +9] |
+| mcp_granularity | task − granular | claude-opus-5-5 | 60/60 | 60/60 | +0 p.p. | [-6; +6] |
+| mcp_granularity | task − granular | claude-sonnet-5-5 | 60/60 | 60/60 | +0 p.p. | [-6; +6] |
+| api_pagination | meta − silent | claude-haiku-5-5 | 40/40 | 39/40 | +3 p.p. | [-7; +13] |
+| api_pagination | meta − silent | claude-opus-5-5 | 40/40 | 40/40 | +0 p.p. | [-9; +9] |
+| api_pagination | meta − silent | claude-sonnet-5-5 | 40/40 | 40/40 | +0 p.p. | [-9; +9] |
+| mcp_toolcount | 5 − 60 | claude-haiku-5-5 | 57/60 | 56/60 | +2 p.p. | [-8; +11] |
+| mcp_toolcount | 5 − 60 | claude-opus-5-5 | 60/60 | 60/60 | +0 p.p. | [-6; +6] |
+| mcp_toolcount | 5 − 60 | claude-sonnet-5-5 | 60/60 | 60/60 | +0 p.p. | [-6; +6] |
+| api_ids | readable − uuid | claude-haiku-5-5 | 60/60 | 60/60 | +0 p.p. | [-6; +6] |
+| api_ids | readable − uuid | claude-opus-5-5 | 60/60 | 60/60 | +0 p.p. | [-6; +6] |
+| api_ids | readable − uuid | claude-sonnet-5-5 | 60/60 | 60/60 | +0 p.p. | [-6; +6] |
+| mcp_descriptions | full − short | claude-haiku-5-5 | 59/60 | 59/60 | +0 p.p. | [-7; +7] |
+| mcp_descriptions | full − short | claude-opus-5-5 | 60/60 | 60/60 | +0 p.p. | [-6; +6] |
+| mcp_descriptions | full − short | claude-sonnet-5-5 | 60/60 | 60/60 | +0 p.p. | [-6; +6] |
+
+## Analiza wrażliwości: limit kroków jako porażka
+
+Przebiegi z poprawnym stanem bazy, ale zakończone na limicie 20 kroków: 15. Gdy liczyć je jako porażki, H1: 358/360 vs 203/360, +43 p.p. [+38; +48], werdykt: potwierdzona.
+
+| eksperyment | porównanie | model | testowany | porównawczy | Δ | 95% CI |
+|---|---|---|---|---|---|---|
+| ui_labels | A − B | claude-haiku-5-5 | 118/120 | 41/120 | +64 p.p. | [+54; +72] |
+| ui_labels | A − B | claude-opus-5-5 | 120/120 | 120/120 | +0 p.p. | [-3; +3] |
+| ui_labels | A − B | claude-sonnet-5-5 | 120/120 | 42/120 | +65 p.p. | [+56; +73] |
+
 ## Efekt do kosztu wdrożenia
 
 | zmiana | Δ sukcesu | 95% CI | linie kodu | p.p. na linię |
 |---|---|---|---|---|
-| ui_labels: B → A | +40 p.p. | [+35; +45] | 48 | 0.83 |
+| ui_labels: B → A | +40 p.p. | [+35; +45] | 24 | 1.67 |
 | mcp_toolcount: 60 → 60ns | +1 p.p. | [-2; +5] | 3 | 0.37 |
 | api_pagination: silent → meta | +1 p.p. | [-2; +5] | 18 | 0.05 |
 | mcp_granularity: granular → task | +1 p.p. | [-2; +3] | 50 | 0.01 |
-| api_errors: generic → rich | -1 p.p. | [-2; +1] | 19 | -0.03 |
 | api_shape: full → concise | +0 p.p. | [-2; +2] | 27 | 0.00 |
 | api_shape: full → fields | +0 p.p. | [-2; +2] | 12 | 0.00 |
 | api_ids: uuid → readable | +0 p.p. | [-2; +2] | 59 | 0.00 |
 | mcp_descriptions: short → full | +0 p.p. | [-3; +3] | 32 | 0.00 |
 | mcp_idempotency: direct → confirm | +0 p.p. | [-3; +3] | 39 | 0.00 |
+| api_errors: generic → rich | -1 p.p. | [-2; +1] | 19 | -0.03 |

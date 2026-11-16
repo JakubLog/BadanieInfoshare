@@ -4,14 +4,14 @@ from harness.tasks import CROSSFIT_FRI, CROSSFIT_SAT, SPINNING_SAT, YOGA_THU, cl
 from klubfit.db import CLIENT_COLUMNS, SEED_DB
 from klubfit.domain import services as svc
 from klubfit.domain.errors import DomainError
-from klubfit.seed import build_seed_db, fingerprint
+from klubfit.seed import SEED_FINGERPRINT, build_seed_db, fingerprint
 from tests.conftest import client_id
 
 
-def test_seed_is_deterministic(tmp_path):
+def test_seed_is_deterministic_and_matches_published_logs(tmp_path):
     a = build_seed_db(tmp_path / "a.sqlite")
     b = build_seed_db(tmp_path / "b.sqlite")
-    assert fingerprint(a) == fingerprint(b) == fingerprint(SEED_DB)
+    assert fingerprint(a) == fingerprint(b) == fingerprint(SEED_DB) == SEED_FINGERPRINT
 
 
 def test_reset_restores_seed_after_writes(db, conn):

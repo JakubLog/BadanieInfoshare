@@ -109,14 +109,21 @@ def create_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
 
 
+def ensure_seed(seed_path: str | Path = SEED_DB) -> Path:
+    """Buduje plik seeda, jeśli go nie ma (albo jest pusty, np. po nieudanym otwarciu)."""
+    seed_path = Path(seed_path)
+    if not seed_path.exists() or seed_path.stat().st_size == 0:
+        from klubfit.seed import build_seed_db
+
+        build_seed_db(seed_path)
+    return seed_path
+
+
 def reset_db(target: str | Path, seed_path: str | Path = SEED_DB) -> Path:
     """Kopiuje nienaruszony plik seeda pod `target`. Wywoływane przed KAŻDYM przebiegiem."""
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
-    if not Path(seed_path).exists():
-        from klubfit.seed import build_seed_db
-
-        build_seed_db(Path(seed_path))
+    ensure_seed(seed_path)
     for suffix in ("", "-wal", "-shm", "-journal"):
         p = Path(str(target) + suffix)
         if p.exists():

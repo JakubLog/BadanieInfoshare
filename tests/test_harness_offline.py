@@ -88,6 +88,8 @@ def mcp_invented_id(step, kw):
 def runs_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(harness.runlog, "RUNS", tmp_path)
     monkeypatch.setattr(runner, "RUNS", tmp_path)
+    monkeypatch.setattr(runner, "BACKEND", "api")  # FakeClient zastępuje API niezależnie od BACKEND w środowisku
+    monkeypatch.setattr(harness.runlog, "TAGGER_LOG", tmp_path / "taxonomy_log.jsonl")
     return tmp_path
 
 

@@ -13,7 +13,7 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
-from klubfit.db import SEED_DB, connect
+from klubfit.db import SEED_DB, connect, ensure_seed
 from klubfit.seed import class_start_utc
 
 RESULT_RE = re.compile(r"WYNIK:\s*\**\s*(\d+)", re.IGNORECASE)
@@ -35,7 +35,6 @@ class Task:
     expected_new: list[tuple[str, ClassRef]] = field(default_factory=list)   # (e-mail klienta, zajęcia)
     expected_cancelled: list[tuple[str, ClassRef]] = field(default_factory=list)
     count_query: Callable[[sqlite3.Connection], tuple[int, set[str]]] | None = None
-    requires_pagination: bool = False
 
 
 YOGA_THU = ClassRef("2026-11-12", "18:00", "Joga")
@@ -77,13 +76,13 @@ TASKS: dict[str, Task] = {t.id: t for t in [
          expected_new=[("anna.kowalska@gmail.com", YOGA_THU)]),
     Task("count_yoga", "Ilu klientów jest zapisanych na czwartkową jogę o 18:00? "
          "Zakończ odpowiedź linią w formacie „WYNIK: <liczba>”.", "answer",
-         count_query=_count_yoga, requires_pagination=True),
+         count_query=_count_yoga),
     Task("move_booking", "Przenieś rezerwację Piotra Nowaka z wtorkowego pilatesu o 19:00 na środowy pilates o 19:00.",
          "write", expected_new=[("piotr.nowak@gmail.com", PILATES_WED)],
          expected_cancelled=[("piotr.nowak@gmail.com", PILATES_TUE)]),
     Task("expiring", "Którym klientom karnet wygasa między 9 a 16 listopada 2026 r. (włącznie)? "
          "Wypisz ich adresy e-mail i zakończ odpowiedź linią w formacie „WYNIK: <liczba klientów>”.", "answer",
-         count_query=_expiring, requires_pagination=True),
+         count_query=_expiring),
     Task("full_class_fallback", "Zapisz Katarzynę Lewandowską na piątkowy crossfit o 17:00. Jeśli nie ma wolnych "
          "miejsc, zapisz ją na najbliższy późniejszy crossfit.", "write",
          expected_new=[("k.lewandowska@interia.pl", CROSSFIT_SAT)]),
@@ -94,7 +93,7 @@ TASKS: dict[str, Task] = {t.id: t for t in [
 
 
 def booking_diff(db_path: str | Path, seed_path: str | Path = SEED_DB) -> dict:
-    seed = connect(seed_path)
+    seed = connect(ensure_seed(seed_path))
     final = connect(db_path)
     before = {r["id"]: dict(r) for r in seed.execute("SELECT * FROM bookings")}
     after = {r["id"]: dict(r) for r in final.execute("SELECT * FROM bookings")}

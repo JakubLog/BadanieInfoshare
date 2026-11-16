@@ -401,6 +401,10 @@ def build_seed_db(path: Path = SEED_DB) -> Path:
     return path
 
 
+# Odcisk seeda, na którym powstały opublikowane logi w runs/ (sprawdzany w tests/test_seed_domain.py).
+SEED_FINGERPRINT = "333732dcae663152a0caed40636fb4830b423f9d30f2e54a9cc61a3c08c3e099"
+
+
 def fingerprint(path: Path) -> str:
     """Skrót zawartości wszystkich tabel (do sprawdzania determinizmu i resetu)."""
     conn = connect(path)

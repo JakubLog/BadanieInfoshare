@@ -464,6 +464,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "anyio" },
     { name = "claude-agent-sdk" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -484,13 +485,14 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.70" },
-    { name = "claude-agent-sdk", specifier = ">=0.2.180" },
+    { name = "anthropic", specifier = ">=2.7,<3" },
+    { name = "anyio", specifier = ">=4" },
+    { name = "claude-agent-sdk", specifier = ">=0.2.180,<0.3" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "matplotlib", specifier = ">=3.9" },
-    { name = "mcp", specifier = ">=1.20" },
+    { name = "mcp", specifier = ">=2.3,<3" },
     { name = "playwright", specifier = ">=1.49" },
     { name = "python-multipart", specifier = ">=0.0.12" },
     { name = "pyyaml", specifier = ">=6.0" },

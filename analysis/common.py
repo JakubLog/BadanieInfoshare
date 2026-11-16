@@ -6,18 +6,22 @@ import math
 import random
 from pathlib import Path
 
-from harness.runlog import RUNS, read_jsonl
+from harness.runlog import ANALYSIS_DIR, RUNS, read_jsonl, rel_path
 
 EXCLUDED_TOP = {"pilot", "debug", "test"}
-ANALYSIS = Path(__file__).resolve().parent
+ANALYSIS = ANALYSIS_DIR
+ANALYSIS.mkdir(parents=True, exist_ok=True)
 
 
-def _is_infra_file(p: Path) -> bool:
-    return ".infra" in p.name
+def _is_interrupted_file(p: Path) -> bool:
+    """Logi nieudanych prób: `.infraN` (błąd infrastruktury) i `.quotaN` (limit abonamentu)."""
+    return ".infra" in p.name or ".quota" in p.name
 
 
 def load_runs(base: Path | None = None) -> tuple[list[dict], list[dict]]:
-    """Zwraca (przebiegi liczone, przebiegi przerwane błędem infrastruktury) z pełnego przebiegu."""
+    """Zwraca (przebiegi liczone, przebiegi przerwane) z katalogu `base` (domyślnie pełny przebieg w RUNS).
+
+    Przerwane to próby zakończone błędem infrastruktury albo limitem abonamentu; pole `interrupted_by` mówi które."""
     base = base or RUNS
     counted, infra = [], []
     for p in sorted(base.rglob("*.jsonl")):
@@ -28,10 +32,11 @@ def load_runs(base: Path | None = None) -> tuple[list[dict], list[dict]]:
         meta = next((r for r in recs if r.get("type") == "meta"), {})
         res = recs[-1] if recs and recs[-1].get("type") == "result" else None
         exp, variant, model, task, _ = rel.parts
-        row = {"experiment": exp, "variant": variant, "model": model, "task": task, "file": str(p.relative_to(RUNS.parent)),
+        row = {"experiment": exp, "variant": variant, "model": model, "task": task, "file": rel_path(p),
                "started_at": meta.get("started_at"), "path": meta.get("path")}
-        if res is None or res.get("infra_error") or _is_infra_file(p):
+        if res is None or res.get("infra_error") or _is_interrupted_file(p):
             row["infra_error"] = (res or {}).get("infra_error", "przerwany zapis")
+            row["interrupted_by"] = "quota" if (".quota" in p.name or (res or {}).get("quota")) else "infra"
             infra.append(row)
             continue
         m = res["metrics"]
@@ -42,7 +47,7 @@ def load_runs(base: Path | None = None) -> tuple[list[dict], list[dict]]:
                    wrong_tool_calls=m["wrong_tool_calls"], duplicates=m["duplicates"],
                    result_tokens=m["result_tokens_total"], injection_exposed=m.get("injection_exposed"),
                    injection_reaction=m.get("injection_reaction"), validation=res["validation"],
-                   finished_at=res.get("finished_at"))
+                   finished_at=res.get("finished_at"), cli_cost=res.get("cli_cost_usd"))
         counted.append(row)
     return counted, infra
 

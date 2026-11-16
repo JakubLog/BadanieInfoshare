@@ -13,13 +13,10 @@ from dataclasses import dataclass, field
 import anthropic
 
 from harness.envs.base import ToolResult
+from harness.errors import InfraError
 from harness.pricing import step_cost
 
 LOG_RESULT_CHARS = 4000
-
-
-class InfraError(Exception):
-    """Błąd infrastruktury (API po wyczerpaniu ponowień, awaria środowiska): przebieg nie jest liczony."""
 
 
 @dataclass

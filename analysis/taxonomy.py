@@ -88,6 +88,10 @@ async def tag_all(concurrency: int = 6) -> None:
     rows, _ = load_runs()
     todo = [r for r in rows if not r["success"] and r["file"] not in done]
     backend = os.environ.get("BACKEND", "api")
+    if not todo:
+        return
+    if backend == "api" and not os.environ.get("ANTHROPIC_API_KEY"):
+        raise SystemExit(f"{len(todo)} nieotagowanych przebiegów, a brak ANTHROPIC_API_KEY (albo ustaw BACKEND=subscription).")
     client = anthropic.AsyncAnthropic(max_retries=10, timeout=300) if backend == "api" else None
     sem = asyncio.Semaphore(concurrency)
     spent = total_spent()
@@ -138,19 +142,22 @@ def write_manual_sample() -> None:
     rng = random.Random(SAMPLE_SEED)
     k = round(0.2 * len(tags))
     sample = sorted(rng.sample(tags, k), key=lambda t: t["file"]) if k else []
+    # Ręczne oceny (manual_*) z istniejącego pliku są zachowywane przy ponownym generowaniu próbki.
+    manual: dict[str, tuple[str, str]] = {}
+    if MANUAL.exists():
+        with MANUAL.open(newline="", encoding="utf-8") as f:
+            manual = {row["file"]: (row["manual_primary"], row["manual_notes"]) for row in csv.DictReader(f)}
     with MANUAL.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["file", "experiment", "variant", "model", "task", "model_primary", "model_secondary",
                     "model_evidence", "manual_primary", "manual_notes"])
         for t in sample:
             w.writerow([t["file"], t["experiment"], t["variant"], t["model"], t["task"], t["primary"],
-                        ";".join(t["secondary"]), t["evidence"], "", ""])
+                        ";".join(t["secondary"]), t["evidence"], *manual.get(t["file"], ("", ""))])
     counts = Counter(t["primary"] for t in tags)
     print(f"Otagowano {len(tags)} przebiegów; próbka do ręcznej oceny: {k}. Rozkład: {dict(counts.most_common())}")
 
 
 if __name__ == "__main__":
-    if os.environ.get("BACKEND", "api") == "api" and not os.environ.get("ANTHROPIC_API_KEY"):
-        raise SystemExit("Brak ANTHROPIC_API_KEY w środowisku.")
     asyncio.run(tag_all())
     write_manual_sample()

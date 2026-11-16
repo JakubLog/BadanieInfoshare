@@ -9,7 +9,7 @@ import json
 import os
 
 import anyio
-import mcp_types as types
+from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 

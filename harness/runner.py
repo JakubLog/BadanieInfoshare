@@ -26,7 +26,8 @@ import anthropic
 import yaml
 
 from harness import metrics as M
-from harness.agent import AgentConfig, InfraError, TokenCounter, run_agent
+from harness.agent import AgentConfig, TokenCounter, run_agent
+from harness.errors import InfraError, QuotaError
 from harness.prompts import system_prompt
 from harness.runlog import RUNS, RunLog, completed, total_spent
 from harness.tasks import TASKS, validate
@@ -37,6 +38,7 @@ from klubfit.mcp.injection import apply_injection
 CONFIG = ROOT / "config" / "experiments.yaml"
 DEFAULT_MODELS = "claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5"
 MAX_INFRA_ATTEMPTS = 3
+MAX_QUOTA_WAITS = 20   # po tylu kolejnych wstrzymaniach na limicie abonamentu przebieg jest porzucany
 BACKEND = os.environ.get("BACKEND", "api")   # api (SDK anthropic + klucz) | subscription (Agent SDK + abonament)
 
 
@@ -53,8 +55,11 @@ def budget() -> float:
 
 
 def git_commit() -> str:
+    """Skrót commita; z sufiksem `-dirty`, gdy w drzewie są niezacommitowane zmiany."""
     try:
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, text=True).strip()
+        head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, text=True).strip()
+        dirty = subprocess.run(["git", "diff", "--quiet", "HEAD", "--", "harness", "klubfit", "config"], cwd=ROOT).returncode
+        return head + ("-dirty" if dirty else "")
     except Exception:
         return "unknown"
 
@@ -97,20 +102,23 @@ class Context:
         self.counters: dict[str, TokenCounter] = {}
         self.browser = None
         self._pw = None
+        self._browser_lock = asyncio.Lock()
         self.spent = total_spent()
         self.max_cost = max_cost
         self.skipped_budget = 0
+        self.executed = 0
         self.commit = git_commit()
 
     def add_cost(self, c: float) -> None:
         self.spent += c
 
     async def ensure_browser(self):
-        if self.browser is None:
-            from playwright.async_api import async_playwright
+        async with self._browser_lock:  # równoległe przebiegi UI współdzielą jedną przeglądarkę
+            if self.browser is None:
+                from playwright.async_api import async_playwright
 
-            self._pw = await async_playwright().start()
-            self.browser = await self._pw.chromium.launch()
+                self._pw = await async_playwright().start()
+                self.browser = await self._pw.chromium.launch()
         return self.browser
 
     async def close(self):
@@ -152,6 +160,8 @@ async def execute(spec: RunSpec, ctx: Context) -> dict | None:
         if res.get("quota"):
             quota_hits += 1
             spec.log_path.rename(spec.log_path.with_suffix(f".quota{quota_hits}.jsonl"))
+            if quota_hits >= MAX_QUOTA_WAITS:
+                return res
             wait_to = (res.get("resets_at") or time.time() + 600) + 60
             ctx.quota_until = max(ctx.quota_until, wait_to)
             print(f"Limit abonamentu: wstrzymuję do {datetime.fromtimestamp(ctx.quota_until)}", flush=True)
@@ -210,11 +220,11 @@ async def _attempt(spec: RunSpec, ctx: Context) -> dict:
                       + out.usage["cache_read_input_tokens"], tokens_out=out.usage["output_tokens"],
                       cost_usd=out.cost_usd, cli_cost_usd=out.cli_cost_usd, steps=out.steps, stop=out.stop,
                       final_text=out.final_text, infra_error=None)
+    except QuotaError as e:
+        result.update(quota=True, resets_at=e.resets_at, infra_error=f"QuotaError: {e}"[:2000])
     except InfraError as e:
         result.update(infra_error=str(e)[:2000])
     except Exception as e:  # awaria harnessu/środowiska: przebieg nie jest liczony
-        if type(e).__name__ == "QuotaError":
-            result.update(quota=True, resets_at=getattr(e, "resets_at", None))
         result.update(infra_error=f"{type(e).__name__}: {e}"[:2000])
     finally:
         if env is not None:
@@ -267,6 +277,7 @@ async def run_specs(specs: list[RunSpec], concurrency: int, max_cost: float | No
             res = await execute(spec, ctx)
         done += 1
         if res is not None:
+            ctx.executed += 1
             tag = "INFRA" if res.get("infra_error") else ("OK " if res.get("success") else "FAIL")
             print(f"[{done}/{total}] {tag} {spec.experiment}/{spec.variant}/{spec.model}/{spec.task}/{spec.rep:02d} "
                   f"steps={res.get('steps')} cost={res.get('cost_usd')} spent={ctx.spent:.2f}", flush=True)
@@ -294,12 +305,19 @@ def main() -> None:
         sys.exit("Brak ANTHROPIC_API_KEY w środowisku (albo ustaw BACKEND=subscription).")
     cfg = load_config()
     if args.phase == "pilot":
-        asyncio.run(run_specs(pilot_specs(cfg), args.concurrency, max_cost=budget()))
+        ctx = asyncio.run(run_specs(pilot_specs(cfg), args.concurrency, max_cost=budget()))
+        if ctx.executed == 0:
+            print(f"Pilot w {RUNS} był już kompletny; zostawiam istniejące ESTIMATE.md i plan.json. "
+                  "Nowy pomiar: ustaw RUNS_DIR i ANALYSIS_DIR na puste katalogi.")
+            return
         from harness.estimate import write_estimate
 
         write_estimate()
     elif args.phase == "full":
-        plan = json.loads((RUNS / "plan.json").read_text())
+        plan_file = RUNS / "plan.json"
+        if not plan_file.exists():
+            sys.exit(f"Brak {plan_file}: najpierw uruchom pilota (make pilot).")
+        plan = json.loads(plan_file.read_text())
         if not plan.get("run_full"):
             print("Szacunek nie dopuszcza pełnego przebiegu (runs/plan.json: run_full=false); pomijam.")
             return

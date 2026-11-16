@@ -1,19 +1,20 @@
 # Ceny w USD za milion tokenów.
 # Źródło: https://platform.claude.com/docs/en/about-claude/pricing (sprawdzone 2026-11-09)
 # oraz https://platform.claude.com/docs/en/models/overview (identyfikatory modeli).
-# Harness używa automatycznego cache promptu (cache_control na poziomie żądania, TTL 5 min).
+# Koszt w raporcie liczony stawką zapisu 5-minutowego (cache_write_5m). Backend `subscription` nie loguje TTL zapisu,
+# a koszt raportowany przez CLI (`cli_cost_usd`) odpowiada stawce 1-godzinnej (cache_write_1h); obie sumy są w README.
 source: https://platform.claude.com/docs/en/about-claude/pricing
 checked: "2026-11-09"
 confirmed: true
 models:
   claude-opus-5-5:
     tiers:
-      - {max_prompt_tokens: null, input: 4.00, cache_write_5m: 5.00, cache_read: 0.20, output: 20.00}
+      - {max_prompt_tokens: null, input: 4.00, cache_write_5m: 5.00, cache_write_1h: 8.00, cache_read: 0.20, output: 20.00}
   claude-sonnet-5-5:
     tiers:
-      - {max_prompt_tokens: null, input: 2.00, cache_write_5m: 2.50, cache_read: 0.10, output: 10.00}
+      - {max_prompt_tokens: null, input: 2.00, cache_write_5m: 2.50, cache_write_1h: 4.00, cache_read: 0.10, output: 10.00}
   claude-haiku-5-5:
     # Haiku 5.5 ma cenę zależną od długości promptu (input + cache read + cache write) w danym żądaniu.
     tiers:
-      - {max_prompt_tokens: 100000, input: 0.10, cache_write_5m: 0.125, cache_read: 0.01, output: 0.50}
-      - {max_prompt_tokens: null, input: 0.50, cache_write_5m: 0.625, cache_read: 0.05, output: 2.50}
+      - {max_prompt_tokens: 100000, input: 0.10, cache_write_5m: 0.125, cache_write_1h: 0.20, cache_read: 0.01, output: 0.50}
+      - {max_prompt_tokens: null, input: 0.50, cache_write_5m: 0.625, cache_write_1h: 1.00, cache_read: 0.05, output: 2.50}

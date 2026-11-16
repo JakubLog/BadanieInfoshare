@@ -1,6 +1,6 @@
 """Szacunek kosztu pełnego planu na podstawie pilota i wybór zakresu mieszczącego się w BUDGET_USD.
 
-Kolejność redukcji (z zadania, zapisana w HYPOTHESES.md przed danymi):
+Kolejność redukcji (zapisana w HYPOTHESES.md przed danymi, sekcja „Ustalenia wspólne”, punkt „Budżet”):
 1) pełny plan (priorytety 1–3, n=20); 2) bez priorytetu 3; 3) bez priorytetów 2 i 3; 4) n=10;
 5) jeśli nadal za drogo: największe n w przedziale 9..3, które się mieści; inaczej brak pełnego przebiegu.
 """

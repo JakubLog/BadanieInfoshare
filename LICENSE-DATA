@@ -1,0 +1,13 @@
+Dane i raport: Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+Copyright (c) 2026 Autorzy badania „Agent jako uczestnik badania użyteczności”
+
+Licencja CC BY 4.0 obejmuje:
+- logi przebiegów w katalogu runs/,
+- wyniki analizy w katalogu analysis/ (pliki .md, .json, .jsonl, .csv i wykresy w analysis/charts/),
+- teksty README.md i HYPOTHESES.md.
+
+Kod źródłowy (w tym pliki .py w analysis/) jest objęty licencją MIT (plik LICENSE).
+
+Pełny tekst licencji: https://creativecommons.org/licenses/by/4.0/legalcode
+Streszczenie: https://creativecommons.org/licenses/by/4.0/deed.pl

@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Callable, Iterator
 
 from klubfit.db import ROOT
 
-RUNS = ROOT / "runs"
-TAGGER_LOG = ROOT / "analysis" / "taxonomy_log.jsonl"
+# Katalogi danych można przestawić zmiennymi środowiskowymi, żeby nowy pomiar nie mieszał się z opublikowanymi logami.
+RUNS = Path(os.environ.get("RUNS_DIR") or ROOT / "runs").resolve()
+ANALYSIS_DIR = Path(os.environ.get("ANALYSIS_DIR") or ROOT / "analysis").resolve()
+TAGGER_LOG = ANALYSIS_DIR / "taxonomy_log.jsonl"
+
+
+def rel_path(p: Path) -> str:
+    """Ścieżka względem katalogu repozytorium (albo bezwzględna, gdy plik leży poza nim)."""
+    try:
+        return str(p.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(p.resolve())
 
 
 class RunLog:

@@ -2,8 +2,9 @@
 
 - Python: linie między znacznikami `# [variant:<flaga>=<wartość>]` i `# [/variant]` (bez samych znaczników
   i komentarzy);
-- szablony UI: linie w gałęziach `{% if V == "A" %}` (do `else`/`endif` na tym samym poziomie) oraz linie
-  z wyrażeniem `V == "A"` w treści.
+- szablony UI: niepuste linie w gałęziach `{% if V == "A" %}` (do `else`/`elif`/`endif` tego samego `if`), bez linii
+  zawierających wyłącznie znaczniki gałęzi i bez komentarzy Jinja, oraz linie spoza gałęzi A z wyrażeniem `V == "A"`
+  w treści (np. `"Następna strona" if V == "A" else "›"`). Wariant B ma własne gałęzie, które nie są liczone.
 """
 
 from __future__ import annotations
@@ -13,14 +14,13 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
+from harness.runlog import ANALYSIS_DIR
 from klubfit.db import ROOT
 
 MARK = re.compile(r"#\s*\[variant:([a-z_]+=[A-Za-z0-9]+)\]")
 END = re.compile(r"#\s*\[/variant\]")
-TPL_IF_A = re.compile(r'{%-?\s*if V == "A"\s*-?%}')
-TPL_IF = re.compile(r"{%-?\s*if\b")
-TPL_ELSE = re.compile(r"{%-?\s*(else|elif)\b")
-TPL_END = re.compile(r"{%-?\s*endif\b")
+TPL_TAG = re.compile(r"{%-?\s*(if|elif|else|endif)\b(.*?)-?%}")
+TPL_COMMENT = re.compile(r"{#.*?#}", re.S)
 
 
 def python_loc() -> dict[str, int]:
@@ -43,34 +43,35 @@ def python_loc() -> dict[str, int]:
     return dict(out)
 
 
-def template_loc() -> int:
+def template_loc(templates: Path | None = None) -> int:
     total = 0
-    for p in sorted((ROOT / "klubfit" / "ui" / "templates").glob("*.html")):
-        depth_stack: list[bool] = []  # True = jesteśmy w gałęzi A tego if-a
-        for line in p.read_text(encoding="utf-8").splitlines():
-            s = line.strip()
-            in_a = any(depth_stack)
-            if TPL_IF_A.search(s):
-                depth_stack.append(True)
+    for p in sorted((templates or ROOT / "klubfit" / "ui" / "templates").glob("*.html")):
+        # komentarze zastępujemy znakami nowej linii, żeby numeracja linii się nie przesunęła
+        text = TPL_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), p.read_text(encoding="utf-8"))
+        stack: list[bool] = []  # dla każdego otwartego if-a: czy jesteśmy w jego gałęzi A
+        for line in text.splitlines():
+            if not line.strip():
                 continue
-            if TPL_IF.search(s):
-                depth_stack.append(False)
-                if in_a:
-                    total += 1
-                continue
-            if TPL_ELSE.search(s) and depth_stack:
-                if depth_stack[-1]:
-                    depth_stack[-1] = False
-                elif in_a:
-                    total += 1
-                continue
-            if TPL_END.search(s) and depth_stack:
-                depth_stack.pop()
-                if any(depth_stack):
-                    total += 1
-                continue
-            if s and (in_a or 'V == "A"' in s):
-                total += 1
+            counted = False
+            pos = 0
+            for m in [*TPL_TAG.finditer(line), None]:
+                segment = line[pos:m.start() if m else len(line)].strip()
+                if segment and (any(stack) or 'V == "A"' in segment):
+                    counted = True  # tekst w gałęzi A albo wyrażenie warunkowe zależne od wariantu
+                if m is None:
+                    break
+                kind = m.group(1)
+                if any(stack) and not (kind != "if" and stack[-1]):
+                    counted = True  # znacznik zagnieżdżonego if-a wewnątrz gałęzi A
+                if kind == "if":
+                    stack.append('V == "A"' in m.group(2))
+                elif kind == "endif":
+                    stack.pop()
+                else:  # else / elif kończą gałąź A tego if-a
+                    stack[-1] = False
+                pos = m.end()
+            total += counted
+        assert not stack, f"niezamknięty if w {p.name}"
     return total
 
 
@@ -92,5 +93,5 @@ def variant_loc() -> dict[str, int]:
 
 if __name__ == "__main__":
     loc = variant_loc()
-    (ROOT / "analysis" / "variant_loc.json").write_text(json.dumps(loc, indent=2, ensure_ascii=False) + "\n")
+    (ANALYSIS_DIR / "variant_loc.json").write_text(json.dumps(loc, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps(loc, indent=2, ensure_ascii=False))

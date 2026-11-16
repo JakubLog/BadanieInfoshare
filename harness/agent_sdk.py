@@ -12,27 +12,21 @@ Różnice względem backendu „api” (harness/agent.py), opisane w README:
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 
-from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, RateLimitEvent, ResultMessage, ToolAnnotations,
-                              create_sdk_mcp_server, query, tool)
-from claude_agent_sdk._errors import ResultError
+from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, RateLimitEvent, ResultError, ResultMessage,
+                              ToolAnnotations, create_sdk_mcp_server, query, tool)
 from claude_agent_sdk.types import TextBlock, ThinkingBlock, ToolUseBlock
 
-from harness.agent import LOG_RESULT_CHARS, AgentConfig, InfraError, Outcome
+from harness.agent import LOG_RESULT_CHARS, AgentConfig, Outcome
+from harness.errors import InfraError, QuotaError
 from harness.pricing import step_cost
 
 SERVER = "klubfit"
 PREFIX = f"mcp__{SERVER}__"
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
-
-
-class QuotaError(Exception):
-    """Wyczerpany limit abonamentu: przebieg nie jest liczony, runner czeka do resetu okna."""
-
-    def __init__(self, message: str, resets_at: int | None):
-        super().__init__(message)
-        self.resets_at = resets_at
+RATE_LIMIT_RE = re.compile(r"\b429\b|rate[ _-]?limit", re.I)
 
 
 def _proxy_tools(env, out: Outcome, state: dict):
@@ -132,7 +126,7 @@ async def _loop(cfg: AgentConfig, system: str, user: str, env, out: Outcome, sta
     except ResultError as e:
         if e.subtype == "error_max_turns" or "maximum number of turns" in str(e):
             out.stop = "max_steps"  # porażka agenta, nie infrastruktury
-        elif "429" in str(e) or "rate" in str(e).lower() and "limit" in str(e).lower():
+        elif RATE_LIMIT_RE.search(str(e)):
             raise QuotaError(f"Agent SDK: {e}", None) from e
         else:
             raise InfraError(f"Agent SDK: {e}") from e

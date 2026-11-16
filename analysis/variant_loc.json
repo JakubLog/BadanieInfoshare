@@ -8,6 +8,6 @@
   "granularity=task": 50,
   "descriptions=full": 32,
   "toolcount=60ns": 3,
-  "ui=A": 48,
+  "ui=A": 24,
   "errors=rich+content": 19
 }
